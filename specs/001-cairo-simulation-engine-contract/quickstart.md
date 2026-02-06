@@ -35,6 +35,7 @@ cairo-version = "2.9.1"
 
 [dependencies]
 dojo = { git = "https://github.com/dojoengine/dojo" }
+openzeppelin = { git = "https://github.com/OpenZeppelin/cairo-contracts" }
 
 [[target.dojo]]
 ```
@@ -52,7 +53,7 @@ default = "beast_td"
 rpc_url = "http://localhost:5050/"
 
 [writers]
-"beast_td" = ["beast_td-simulation", "beast_td-match_actions", "beast_td-squad"]
+"beast_td" = ["beast_td-simulation", "beast_td-match_actions", "beast_td-squad", "beast_td-admin"]
 ```
 
 ## Development Workflow
@@ -99,6 +100,18 @@ Mulberry32 uses `u32` wrapping arithmetic. Use `core::num::traits::WrappingAdd` 
 ### Simulation Runs In-Memory
 The full tick loop executes within a single function call. No intermediate storage writes. Only the final `MatchResult` is persisted via `world.write_model()`.
 
+### ERC20 Token Escrow
+Players must call `token.approve(game_contract, wager_amount)` before `create_match` / `join_match`. The contract uses OpenZeppelin's `IERC20Dispatcher` for:
+- `transfer_from(player, contract, amount)` — escrow on create/join
+- `transfer(winner, payout)` — distribute on resolution
+- `transfer(player, wager)` — refund on cancel or draw
+
+### Admin Bootstrap
+After deployment, the admin (deployer) must:
+1. Register at least one map via `register_map`
+2. Approve at least one wager token via `approve_token` (e.g., ETH, LORDS)
+3. Optionally set a different fee recipient via `set_fee_recipient`
+
 ### Testing Against JS Reference
 Generate reference outputs by running `SimulationEngine.js` with known configs and seeds, then assert Cairo produces identical results in `sozo test`.
 
@@ -112,11 +125,13 @@ contracts/
 │   │   ├── beast.cairo
 │   │   ├── grid.cairo
 │   │   ├── match_state.cairo
+│   │   ├── admin.cairo
 │   │   └── simulation.cairo
 │   ├── systems/
 │   │   ├── simulation.cairo
 │   │   ├── match_actions.cairo
-│   │   └── squad.cairo
+│   │   ├── squad.cairo
+│   │   └── admin.cairo
 │   ├── utils/
 │   │   ├── rng.cairo
 │   │   ├── math.cairo
@@ -129,7 +144,8 @@ contracts/
 │   ├── test_monster_tiers.cairo
 │   ├── test_simulation.cairo
 │   ├── test_match.cairo
-│   └── test_squad.cairo
+│   ├── test_squad.cairo
+│   └── test_admin.cairo
 ├── Scarb.toml
 ├── dojo_dev.toml
 └── katana.toml

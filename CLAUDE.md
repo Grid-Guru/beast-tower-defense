@@ -74,6 +74,9 @@ SimulationEngine — orchestrates tick loop, manages towers/monsters/queue/log
 ## Active Technologies
 - Cairo 2.x (Starknet smart contract language, compiled via Scarb) + Dojo framework (ECS game engine), Scarb (Cairo package manager), Sozo (Dojo CLI), Katana (local sequencer), Torii (indexer) (001-cairo-simulation-engine-contract)
 - Dojo World contract (on-chain model storage via `world.write_model` / `world.read_model`) (001-cairo-simulation-engine-contract)
+- Cairo 2.9.x (via Dojo framework) + Dojo (ECS game framework for Starknet), OpenZeppelin Cairo Contracts (ERC20 dispatcher for token transfers) (001-cairo-simulation-engine-contract)
+- Dojo World (on-chain ECS storage via `#[dojo::model]`) (001-cairo-simulation-engine-contract)
+- Dojo World (on-chain ECS storage via `#[dojo::model]`) (001-cairo-simulation-engine-contract)
 
 ## Recent Changes
 - 001-cairo-simulation-engine-contract: Added Cairo 2.x (Starknet smart contract language, compiled via Scarb) + Dojo framework (ECS game engine), Scarb (Cairo package manager), Sozo (Dojo CLI), Katana (local sequencer), Torii (indexer)

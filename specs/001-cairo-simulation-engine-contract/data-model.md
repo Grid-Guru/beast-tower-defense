@@ -6,29 +6,36 @@
 ## Entity Relationship Overview
 
 ```
+AdminConfig (config_id=1) — Singleton
+    ├── admin: ContractAddress
+    └── fee_recipient: ContractAddress
+
+ApprovedToken (token_address)
+    └── approved: bool
+
 GameGrid (grid_id)
-    │
-    ├── pathTiles: Array<(u8, u8)>
-    ├── blockedTiles: Array<(u8, u8)>
+    ├── pathTiles: GridPathTile[0..path_count]
+    ├── blockedTiles: GridBlockedTile[0..blocked_count]
     ├── startTile: (u8, u8)
     └── endTile: (u8, u8)
 
 Match (match_id)
-    │
     ├── player1: ContractAddress
     ├── player2: ContractAddress
     ├── grid_id: u32
-    ├── wager: u256
+    ├── wager_token: ContractAddress
+    ├── wager_amount: u256
+    ├── budget: u32
     ├── status: MatchStatus
     │
     ├── PlayerSetup (match_id, player_address)
-    │   ├── towers: Array<TowerConfig>
-    │   └── beasts: Array<BeastConfig>
+    │   ├── towers: PlayerTower[0..tower_count]
+    │   └── beasts: PlayerBeast[0..beast_count]
     │
     └── MatchResult (match_id)
-        ├── round1: RoundResult
-        ├── round2: RoundResult
-        └── winner: ContractAddress
+        ├── round1: {killed, escaped, ticks, winner}
+        ├── round2: {killed, escaped, ticks, winner}
+        └── final_winner: ContractAddress
 
 BeastConfig (value object, not persisted independently)
     ├── beast_id: u32
@@ -44,6 +51,50 @@ TowerConfig (value object)
 ```
 
 ## Dojo Models (Persisted On-Chain)
+
+### AdminConfig
+
+Singleton model for protocol governance. Keyed by a constant `config_id = 1`.
+
+```cairo
+#[derive(Copy, Drop, Serde)]
+#[dojo::model]
+pub struct AdminConfig {
+    #[key]
+    pub config_id: u8,           // always 1
+    pub admin: ContractAddress,
+    pub fee_recipient: ContractAddress,
+}
+```
+
+**Initialization**: Set `admin = deployer` and `fee_recipient = deployer` during contract deployment.
+
+**Validation rules**:
+- Only `admin` can call `register_map`, `approve_token`, `revoke_token`, `set_fee_recipient`, `transfer_admin`
+- `transfer_admin` requires `new_admin != zero_address`
+
+---
+
+### ApprovedToken
+
+Tracks which ERC20 tokens can be used for match wagers.
+
+```cairo
+#[derive(Copy, Drop, Serde)]
+#[dojo::model]
+pub struct ApprovedToken {
+    #[key]
+    pub token: ContractAddress,
+    pub approved: bool,
+}
+```
+
+**Validation rules**:
+- `create_match` checks `ApprovedToken { token: wager_token }.approved == true`
+- Only admin can set `approved` to true (approve) or false (revoke)
+- Revoking a token does not affect in-progress matches using that token
+
+---
 
 ### GameGrid
 
@@ -95,6 +146,7 @@ pub struct GridBlockedTile {
 - `start` and `end` must be path tiles
 - No path tile can also be a blocked tile
 - Path must form a connected graph from start to end
+- Only admin can register maps
 
 ---
 
@@ -119,7 +171,9 @@ pub struct Match {
     pub player1: ContractAddress,
     pub player2: ContractAddress,
     pub grid_id: u32,
-    pub wager: u256,
+    pub wager_token: ContractAddress,
+    pub wager_amount: u256,
+    pub budget: u32,
     pub status: MatchStatus,
     pub seed: u64,
     pub winner: ContractAddress,
@@ -134,9 +188,11 @@ InProgress → Completed (on simulation completion)
 ```
 
 **Validation rules**:
-- `player2 != player1`
-- `wager > 0`
+- `player2 != player1` (FR-013)
+- `wager_amount > 0`
+- `wager_token` must be in `ApprovedToken` list (FR-008a)
 - `grid_id` must reference a registered GameGrid
+- `budget > 0`
 - Only `player1` can cancel; only while `AwaitingOpponent`
 
 ---
@@ -198,13 +254,15 @@ pub struct PlayerBeast {
 ```
 
 **Validation rules**:
-- `tower_count` <= MAX_TOWERS (e.g., 5)
-- `beast_count` <= MAX_BEASTS (e.g., 5)
-- `total_cost` <= SQUAD_BUDGET
+- `tower_count` <= MAX_TOWERS (5)
+- `beast_count` <= MAX_BEASTS (5)
+- `total_cost` <= match.budget (per-match budget from FR-017)
 - Tower positions must be within grid bounds, not on path tiles, not on blocked tiles
 - No two towers on the same tile
 - `tier` must be 1-5
 - `beast_type` must be 1-3 (hunter/magic/brute)
+- `level` > 0, `health` > 0
+- Neither towers nor beasts array can be empty (FR-018)
 
 ---
 

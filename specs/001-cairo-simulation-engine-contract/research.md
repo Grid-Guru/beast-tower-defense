@@ -119,31 +119,36 @@ All of these can be expressed as `(value * numerator) / denominator`:
 
 ### 5. Match Lifecycle & Wager System
 
-**Decision**: Simple escrow pattern — wager locked on create, matched on join, distributed on resolution.
+**Decision**: ERC20 escrow pattern — match creator selects a token from the protocol-approved list. Wager locked on create via `transfer_from`, matched on join, distributed on resolution.
 
 **Rationale**:
-- `create_match`: Player 1 sends wager (ETH/STRK) with their defender setup. Funds held in World contract.
-- `join_match`: Player 2 sends matching wager with their attacker squad. Both rounds execute immediately.
-- `resolve`: Winner receives 95%, protocol receives 5%. Automatic on match completion.
+- `create_match`: Player 1 approves the contract, then calls `create_match` with wager token address and amount. Contract calls `token.transfer_from(caller, contract, amount)`.
+- `join_match`: Player 2 approves the same token, then joins. Contract calls `token.transfer_from(caller, contract, amount)` for the matching wager.
+- Resolution: Winner receives 95% via `token.transfer(winner, payout)`. Protocol receives 5% via `token.transfer(fee_recipient, fee)`.
+- Cancellation: Full refund via `token.transfer(player1, wager)`.
 
-Both players must submit BOTH their tower placement AND their attacker squad upfront (before seeing the opponent's setup). This eliminates the need for commit-reveal for tower placement and simplifies the flow.
+Both players must submit BOTH their tower placement AND their attacker squad upfront (before seeing the opponent's setup). This eliminates the need for commit-reveal for tower placement.
+
+**Token approval**: The contract maintains an `ApprovedToken` model. Only tokens on the approved list can be used for wagers. Admin can add/remove tokens.
 
 **Alternatives considered**:
-- Commit-reveal scheme: More complex, requires additional transactions and timeout handling. Deferred to future improvement.
-- Progressive revelation: Player 2 sees towers before choosing attackers. Rejected — breaks competitive fairness.
+- Native ETH value (payable functions): Starknet doesn't have native ETH payable the same way Ethereum does; ETH is an ERC20 on Starknet. Using ERC20 dispatcher is the standard pattern. No downside.
+- Any-token (no approved list): Risk of spam tokens, rug-pull tokens, or non-standard ERC20s. Approved list provides operator curation. Selected per spec clarification Q1.
 
 ---
 
 ### 6. Grid Storage Strategy
 
-**Decision**: Pre-register grid definitions as Dojo models. Path tiles stored as a packed array.
+**Decision**: Pre-register grid definitions as Dojo models. Path tiles stored as separate indexed models.
 
 **Rationale**: Grids are static, defined by the game designers. They don't change during gameplay. Storing them as Dojo models allows:
 - Multiple grid options for map selection
 - On-chain validation of tower placement
 - Path tile iteration during simulation
 
-**Path tile storage**: Since Cairo doesn't have dynamic arrays in storage efficiently, path tiles can be stored as a `Span<(u8, u8)>` serialized into a `ByteArray` or as a fixed-size array with a length counter. For MVP, a reasonable max path length (e.g., 64 tiles) with a fixed array works.
+**Path tile storage**: Since Cairo doesn't have dynamic arrays in storage efficiently, path tiles and blocked tiles are stored as separate `GridPathTile` / `GridBlockedTile` models keyed by `(grid_id, index)`. The `GameGrid` model stores `path_count` and `blocked_count` to know how many tiles to read.
+
+For MVP, a reasonable max path length (e.g., 64 tiles) is enforced.
 
 ---
 
@@ -165,14 +170,15 @@ The `spawn_test_world` Dojo helper enables integration tests that deploy a test 
 **Decision**: Emit Dojo events for key simulation milestones. Detailed per-tick events emitted as custom events.
 
 **Rationale**: Torii (Dojo's indexer) automatically indexes `#[dojo::event]` emissions. The client needs:
-- Match created/joined/resolved events (for lobby UI)
+- Match created/joined/resolved/cancelled events (for lobby UI)
 - Simulation result events (for result display)
 - Per-tick combat events are optional for replay visualization (can be emitted as custom events and indexed by Torii)
 
 **Event types**:
-- `MatchCreated { match_id, player1, grid_id, wager }`
+- `MatchCreated { match_id, player1, grid_id, wager_token, wager_amount, budget }`
 - `MatchJoined { match_id, player2 }`
 - `MatchResolved { match_id, winner, p1_score, p2_score }`
+- `MatchCancelled { match_id }`
 - `SimulationTick { match_id, round, tick, event_type, data }` (for replay)
 
 ---
@@ -207,3 +213,77 @@ The `spawn_test_world` Dojo helper enables integration tests that deploy a test 
 
 **Alternatives considered**:
 - Full NFT integration in MVP: Requires cross-contract calls to Loot Survivor, adds complexity and external dependency. Rejected for MVP.
+
+---
+
+### 11. ERC20 Token Escrow Pattern
+
+**Decision**: Use OpenZeppelin's `IERC20Dispatcher` for all token operations. Require ERC20 `approve` before `create_match`/`join_match`.
+
+**Rationale**: On Starknet, all tokens (including ETH and STRK) are ERC20 contracts. The standard pattern is:
+1. Player calls `token.approve(game_contract, amount)` before match creation/join
+2. Contract calls `token.transfer_from(player, self, amount)` to escrow
+3. On resolution, contract calls `token.transfer(winner, payout)` and `token.transfer(fee_recipient, fee)`
+4. On cancellation, contract calls `token.transfer(player1, wager)`
+
+The `IERC20Dispatcher` from OpenZeppelin Cairo Contracts provides type-safe cross-contract calls:
+```cairo
+use openzeppelin::token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
+
+let token = IERC20Dispatcher { contract_address: wager_token };
+token.transfer_from(caller, self_address, amount);
+```
+
+**Key considerations**:
+- No re-entrancy risk: Cairo/Starknet's execution model is sequential within a transaction
+- Fee rounding: `winner_payout = total_pot * 95 / 100`, `fee = total_pot - winner_payout` (ensures no dust loss)
+- Draws: Both players refunded in full, no fee charged
+
+---
+
+### 12. Single Admin Governance Model
+
+**Decision**: Single admin address (deployer) with transferable ownership. No multi-sig, no timelock, no DAO.
+
+**Rationale**: Per spec clarification Q3, a single admin is sufficient for MVP. The admin controls:
+- `register_map(grid_id, width, height, path_tiles, blocked_tiles, start, end)` — add new maps
+- `approve_token(token_address)` — add token to approved wager list
+- `revoke_token(token_address)` — remove token from approved list
+- `set_fee_recipient(address)` — change protocol fee recipient
+- `transfer_admin(new_admin)` — transfer admin ownership
+
+All admin functions check `assert(caller == admin_config.admin)`.
+
+The `AdminConfig` is a singleton Dojo model (keyed by a constant, e.g., `config_id = 1`):
+```cairo
+#[dojo::model]
+struct AdminConfig {
+    #[key]
+    config_id: u8,  // always 1
+    admin: ContractAddress,
+    fee_recipient: ContractAddress,
+}
+```
+
+**Alternatives considered**:
+- Multi-sig governance: Adds complexity, unnecessary for MVP. Can upgrade later.
+- Ownable pattern (OpenZeppelin): Viable but Dojo's model system already handles storage. A simple model + assert is cleaner than importing the Ownable component.
+
+---
+
+### 13. Per-Match Squad Budget
+
+**Decision**: Squad budget is set per-match by the creator. Both players are validated against the same budget.
+
+**Rationale**: Per spec clarification Q4, the match creator chooses the budget when creating a match. This enables:
+- Casual matches with high budgets (fewer constraints)
+- Competitive matches with tight budgets (more strategic depth)
+- Tournament organizers can standardize budgets per event
+
+The budget is stored as a `u32` field on the `Match` model. Both `create_match` and `join_match` validate that `sum(beast_cost(b))` for towers + beasts <= budget.
+
+**Beast cost formula**: `cost = level + health` (per spec assumptions). Stored as assumption, may be adjusted post-playtesting.
+
+**Alternatives considered**:
+- Protocol-wide fixed budget: Inflexible, removes player agency. Rejected per clarification.
+- No budget (honor system): Defeats the purpose of competitive fairness. Rejected.

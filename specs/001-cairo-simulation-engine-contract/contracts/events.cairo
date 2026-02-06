@@ -2,7 +2,7 @@
 // Events — Interface Definition
 // =============================================================================
 // This is a DESIGN ARTIFACT, not compilable code. It defines the Dojo events
-// emitted by the simulation and match systems.
+// emitted by the simulation, match, and admin systems.
 // =============================================================================
 
 // --- Match Lifecycle Events ---
@@ -14,7 +14,9 @@ struct MatchCreated {
     match_id: u32,
     player1: ContractAddress,
     grid_id: u32,
-    wager: u256,
+    wager_token: ContractAddress,
+    wager_amount: u256,
+    budget: u32,
 }
 
 #[derive(Copy, Drop, Serde)]
@@ -42,6 +44,46 @@ struct MatchResolved {
 struct MatchCancelled {
     #[key]
     match_id: u32,
+}
+
+// --- Admin Events ---
+
+#[derive(Copy, Drop, Serde)]
+#[dojo::event]
+struct TokenApproved {
+    #[key]
+    token: ContractAddress,
+}
+
+#[derive(Copy, Drop, Serde)]
+#[dojo::event]
+struct TokenRevoked {
+    #[key]
+    token: ContractAddress,
+}
+
+#[derive(Copy, Drop, Serde)]
+#[dojo::event]
+struct MapRegistered {
+    #[key]
+    grid_id: u32,
+    width: u8,
+    height: u8,
+}
+
+#[derive(Copy, Drop, Serde)]
+#[dojo::event]
+struct AdminTransferred {
+    #[key]
+    previous_admin: ContractAddress,
+    new_admin: ContractAddress,
+}
+
+#[derive(Copy, Drop, Serde)]
+#[dojo::event]
+struct FeeRecipientUpdated {
+    #[key]
+    new_fee_recipient: ContractAddress,
 }
 
 // --- Simulation Events (emitted per-tick for replay/indexing) ---

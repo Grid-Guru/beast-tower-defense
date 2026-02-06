@@ -5,6 +5,15 @@
 **Status**: Draft
 **Input**: Create a provable on-chain version of the Beast Tower Defense simulation engine, enabling trustless competitive 1v1 matches with wagers.
 
+## Clarifications
+
+### Session 2026-02-06
+
+- Q: Which currency/token do players wager? → A: Configurable per match — the match creator selects a token from a protocol-approved list.
+- Q: Should open matches expire automatically after inactivity? → A: No — matches have no expiration. The creator must manually cancel to reclaim their escrowed wager.
+- Q: Who administers the protocol (fee recipient, approved tokens, map registration)? → A: Single admin address (the deployer), with the ability to transfer ownership later.
+- Q: How is the squad point budget determined for a match? → A: Per-match — the match creator sets the budget when creating the match. Both players must build squads within the same budget.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Resolve a Battle Trustlessly (Priority: P1)
@@ -97,8 +106,9 @@ Players compose their battle squad — selecting which beasts serve as defending
 
 **Match System**
 
-- **FR-007**: The system MUST allow a player to create a match by selecting a map, placing towers, choosing attacker beasts, and setting a wager amount.
-- **FR-008**: The system MUST hold wagers in escrow until the match is resolved or cancelled.
+- **FR-007**: The system MUST allow a player to create a match by selecting a map, placing towers, choosing attacker beasts, selecting a wager token from the approved list, setting a wager amount, and setting a squad point budget.
+- **FR-008**: The system MUST hold wagers in escrow until the match is resolved or cancelled. The escrowed token must match the token selected at match creation.
+- **FR-008a**: The system MUST maintain an approved token list. Only tokens on this list may be used for wagers. The protocol operator can add or remove tokens from the list.
 - **FR-009**: The system MUST allow a second player to join an open match by submitting their own setup and a matching wager.
 - **FR-010**: The system MUST execute two rounds per match with role swapping (each player defends once and attacks once) and determine an overall winner.
 - **FR-011**: The system MUST distribute 95% of the total pot to the winner and 5% as a protocol fee.
@@ -110,8 +120,13 @@ Players compose their battle squad — selecting which beasts serve as defending
 
 - **FR-015**: The system MUST validate that towers are placed only on free spaces (not on the path, not on forbidden tiles, within map boundaries).
 - **FR-016**: The system MUST validate that no two towers occupy the same space.
-- **FR-017**: The system MUST validate squad compositions against the point budget and reject over-budget squads.
+- **FR-017**: The system MUST validate squad compositions against the match's point budget (set by the creator) and reject over-budget squads. Both players' squads are validated against the same budget.
 - **FR-018**: The system MUST reject squads with invalid beast data (invalid tier, invalid type, zero health, zero level, empty squad).
+
+**Administration**
+
+- **FR-021**: The system MUST have a single protocol admin (initially the deployer) who can register maps, manage the approved wager token list, set the protocol fee recipient address, and transfer admin ownership.
+- **FR-022**: The system MUST restrict all administrative actions to the current admin address. Non-admin callers attempting admin actions MUST be rejected.
 
 **Results & Auditability**
 
@@ -122,7 +137,7 @@ Players compose their battle squad — selecting which beasts serve as defending
 
 - **Beast**: A Loot Survivor creature with a unique identity. Key attributes: tier (1-5, determines ability), type (Hunter/Magic/Brute, determines matchup advantages), level (determines power as a tower), health (determines endurance as an attacker).
 - **Map**: A pre-designed game board with a defined path from start to end, forbidden spaces where towers cannot be placed, and free spaces for tower placement. Maps are fixed and selected by players when creating a match.
-- **Match**: A competitive 1v1 session between two players. Contains the selected map, both players' setups, wager amount, status (awaiting opponent / in progress / completed / cancelled), and the final result.
+- **Match**: A competitive 1v1 session between two players. Contains the selected map, both players' setups, wager token, wager amount, squad point budget, status (awaiting opponent / in progress / completed / cancelled), and the final result.
 - **Player Setup**: A player's complete battle configuration for a match — which beasts are placed as towers (and where), and which beasts are sent as attackers.
 - **Match Result**: The recorded outcome of a completed match — per-round scores (beasts killed and escaped), net scores, and the overall winner.
 
@@ -131,9 +146,11 @@ Players compose their battle squad — selecting which beasts serve as defending
 - Beast stats (tier, type, level, health) are provided as inputs at match creation. On-chain verification of beast NFT ownership is deferred to a future feature.
 - Maps are pre-registered by game operators. Player-created maps are out of scope.
 - The beast cost formula is `level + health`. This may be adjusted after playtesting.
+- The squad point budget is set per match by the creator. No protocol-wide default is enforced, though a reasonable range (e.g., 200–2000) may be suggested in the UI.
 - Maximum squad size is 5 towers and 5 attacker beasts per player.
 - Both players submit ALL of their setup (towers + attackers) in a single action, eliminating the need for a commit-reveal scheme.
 - Draws where both squad costs are also equal result in full wager refunds to both players.
+- Open matches do not expire automatically. The creator must cancel manually to reclaim their escrowed wager. No timeout mechanism is needed for MVP.
 
 ## Success Criteria *(mandatory)*
 
