@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:dojoengine.org)",
+      "WebSearch",
+      "Bash(.specify/scripts/bash/check-prerequisites.sh:*)",
+      "Bash(sozo:*)",
+      "Bash(scarb:*)",
+      "Bash(node -e:*)"
+    ]
+  }
+}
