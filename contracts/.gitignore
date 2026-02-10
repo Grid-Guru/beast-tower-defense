@@ -1,0 +1,7 @@
+target/
+dojo_mainnet.toml
+manifest_dev.json
+manifest_release.json
+.DS_Store
+*.log
+.env*
